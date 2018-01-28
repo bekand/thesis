@@ -9,9 +9,9 @@ TRAIN_DIR = '../cnn_input/train/'
 TEST_DIR = '../cnn_input/test/'
 
 NUM_CLASSES = 10
-LABEL_NAMES = ['Art Nouveau', 'Baroque', 'Expressionism',
+LABEL_NAMES = ['Art Nouveau (Modern)', 'Baroque', 'Expressionism',
                'Impressionism', 'Post-Impressionsim', 'Realism',
-               'Rococco', 'Romanticism', 'Surrealism', 'Symbolism']
+               'Rococo', 'Romanticism', 'Surrealism', 'Symbolism']
 
 # --Helper Functions --
 def label_as_one_hot(label):

@@ -1,0 +1,4 @@
+tensorflow==1.5.0
+numpy==1.14.0
+Pillow==5.0.0
+forked_path==0.2.3

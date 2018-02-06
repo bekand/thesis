@@ -1,46 +1,56 @@
 # -*- coding: utf-8 -*-
 
 import tensorflow as tf
-# from tqdm import tqdm
-# import cv2
+import tfrecords_generator
+import os.path as path
+from PIL import Image
 
 # --Constants--
-TRAIN_DIR = '../cnn_input/train/'
-TEST_DIR = '../cnn_input/test/'
-
+DATA_DIR = path.expanduser('cnn_input')
 NUM_CLASSES = 10
 LABEL_NAMES = ['Art Nouveau (Modern)', 'Baroque', 'Expressionism',
                'Impressionism', 'Post-Impressionsim', 'Realism',
                'Rococo', 'Romanticism', 'Surrealism', 'Symbolism']
 
-# --Helper Functions --
-def label_as_one_hot(label):
-    try:
-        label = label.decode()
-    except AttributeError:
-        pass
-    return tf.one_hot(indices=LABEL_NAMES.index(label), depth=NUM_CLASSES)
+# tfrecords_generator.process_data_dir(DATA_DIR)
+TRAIN_RECORD = (path.join(DATA_DIR, 'train\\train.tfrecords'))
 
-# A TensorFlow Session for use in interactive contexts, such as a shell.
-sess = tf.InteractiveSession()
+def parser(example_proto):
+    features = {'label': tf.FixedLenFeature((), tf.int64, default_value=0),
+                'text_label': tf.FixedLenFeature((), tf.string, default_value=""),
+                'image': tf.FixedLenFeature((), tf.string, default_value="")}
+    parsed_features = tf.parse_single_example(example_proto, features)
+    parsed_features['image'] = tf.decode_raw(parsed_features['image'], tf.uint8)
+    # parsed_features['image'] = tf.reshape(parsed_features['image'], [224,224,3])
+    return parsed_features['label'], parsed_features['text_label'], parsed_features['image']
 
-csv_path = tf.train.string_input_producer([TRAIN_DIR+'train.csv'])
-reader = tf.TextLineReader()
-_, csv_content = reader.read(csv_path)
+def input_pipeline(path_to_recod, batch_size, parser=parser):
+    dataset = tf.data.TFRecordDataset(path_to_recod)
+    dataset = dataset.map(parser)
+    dataset = dataset.shuffle(500)
+    dataset = dataset.prefetch(2 *batch_size)
+    dataset = dataset.batch(batch_size)
 
-# defaults, also gives the shape of the output tensors for tf.decode
-record_defaults = [[""], [""], [""], [""]]
-artist, style, title, filename = tf.decode_csv(csv_content, record_defaults)
+    # Return an *initializable* iterator over the dataset, which will allow us to
+    # re-initialize it at the beginning of each epoch.
+    return dataset.make_initializable_iterator()
 
-sess.run(tf.global_variables_initializer())
-# tf.get_default_graph().finalize()
+with tf.Session() as sess:
+    iterator = input_pipeline(TRAIN_RECORD, 10)
+    sess.run(tf.global_variables_initializer())
+    sess.run(iterator.initializer)
+    labels, text_labels, images = sess.run(iterator.get_next())
+    sess.run(iterator.initializer)
+    #labels, text_labels, images = sess.run(iterator.get_next())
+    # img = sess.run(tf.reshape(images[0], (224,224,3))) 
+    # print (img)
+    print(images[0])
+    tf.get_default_graph().finalize()
 
-# #
-coordinator = tf.train.Coordinator()
-threads = tf.train.start_queue_runners(coord=coordinator)
-print(label_as_one_hot(style.eval()).eval())
+    coordinator = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(coord=coordinator)
 
-# Wait for threads to finish, cleanup
-coordinator.request_stop()
-coordinator.join(threads)
-sess.close()
+    # Wait for threads to finish, cleanup
+    coordinator.request_stop()
+    coordinator.join(threads)
+    sess.close()

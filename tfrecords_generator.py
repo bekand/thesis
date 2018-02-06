@@ -8,6 +8,7 @@ import tensorflow as tf
 import pickle
 import numpy as np
 import sys
+import random
 from PIL import Image
 from PIL import ImageFile
 Image.MAX_IMAGE_PIXELS = None
@@ -31,6 +32,7 @@ def convert_to_tfrecord(dataset_name,
     filenames = glob.glob(path.join(data_directory, files))
     classes = (path.basename(path.dirname(name)) for name in filenames) if directories_as_labels else [None] * len(filenames)
     dataset = list(zip(filenames, classes))
+    random.shuffle(dataset)
 
     num_examples = len(filenames)
     record_filename = path.join(data_directory, dataset_name+'.tfrecords')
@@ -67,4 +69,4 @@ def process_data_dir(data_dir: str):
         pickle.dump(class_name2id, p, protocol=pickle.HIGHEST_PROTOCOL)
 
     convert_to_tfrecord('train', train_data_dir, class_name2id)
-    convert_to_tfrecord('test', test_data_dir, class_name2id, directories_as_labels=False)
+    # convert_to_tfrecord('test', test_data_dir, class_name2id, directories_as_labels=False)

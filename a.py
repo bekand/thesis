@@ -3,7 +3,6 @@
 import tensorflow as tf
 import tfrecords_generator
 import os.path as path
-from PIL import Image
 
 # --Constants--
 DATA_DIR = path.expanduser('cnn_input')
@@ -17,18 +16,17 @@ TRAIN_RECORD = (path.join(DATA_DIR, 'train\\train.tfrecords'))
 
 def parser(example_proto):
     features = {'label': tf.FixedLenFeature((), tf.int64, default_value=0),
-                'text_label': tf.FixedLenFeature((), tf.string, default_value=""),
                 'image': tf.FixedLenFeature((), tf.string, default_value="")}
     parsed_features = tf.parse_single_example(example_proto, features)
     parsed_features['image'] = tf.decode_raw(parsed_features['image'], tf.uint8)
-    # parsed_features['image'] = tf.reshape(parsed_features['image'], [224,224,3])
-    return parsed_features['label'], parsed_features['text_label'], parsed_features['image']
+    parsed_features['image'] = tf.reshape(parsed_features['image'], (224 ,224, 3))
+    return parsed_features['label'], parsed_features['image']
 
 def input_pipeline(path_to_recod, batch_size, parser=parser):
     dataset = tf.data.TFRecordDataset(path_to_recod)
     dataset = dataset.map(parser)
-    dataset = dataset.shuffle(500)
-    dataset = dataset.prefetch(2 *batch_size)
+    dataset = dataset.shuffle(10 * batch_size)
+    dataset = dataset.prefetch(2 * batch_size)
     dataset = dataset.batch(batch_size)
 
     # Return an *initializable* iterator over the dataset, which will allow us to
@@ -39,12 +37,11 @@ with tf.Session() as sess:
     iterator = input_pipeline(TRAIN_RECORD, 10)
     sess.run(tf.global_variables_initializer())
     sess.run(iterator.initializer)
-    labels, text_labels, images = sess.run(iterator.get_next())
+    labels, images = sess.run(iterator.get_next())
     sess.run(iterator.initializer)
-    #labels, text_labels, images = sess.run(iterator.get_next())
-    # img = sess.run(tf.reshape(images[0], (224,224,3))) 
-    # print (img)
-    print(images[0])
+    labels, images = sess.run(iterator.get_next())
+    print(labels)
+
     tf.get_default_graph().finalize()
 
     coordinator = tf.train.Coordinator()

@@ -9,10 +9,8 @@ import pickle
 import numpy as np
 import sys
 import random
-from PIL import Image
-from PIL import ImageFile
-Image.MAX_IMAGE_PIXELS = None
-ImageFile.LOAD_TRUNCATED_IMAGES = True
+import cv2
+
 
  # Create a Int64List Feature
 def _int64_feature(value):
@@ -36,24 +34,33 @@ def convert_to_tfrecord(dataset_name,
 
     num_examples = len(filenames)
     record_filename = path.join(data_directory, dataset_name+'.tfrecords')
-
+    file = open('badfiles.txt', 'w+') 
     with tf.python_io.TFRecordWriter(record_filename) as writer:
         print('Writing'+record_filename +'\n')
         for index, sample in enumerate(dataset):
             file_path, label = sample
-            print('Processing: '+ file_path +'\n')
-            image = Image.open(file_path)
-            image = image.resize((224, 224))
-            image_raw = np.array(image).tostring()
-
-            features = {
-                'label': _int64_feature(class_map[label]),
-                'text_label': _bytes_feature(label.encode()),
-                'image': _bytes_feature(image_raw)
-            }
+            image = cv2.imread(file_path)
+            try:
+                image = cv2.resize(image, (224, 224))
+                if np.shape(image) == (224, 224, 3):
+                    print('Processing: '+ file_path +'\n' + 'with shape:' + str(np.shape(image)))
+                    image_raw = np.array(image).tostring()
+                    features = {
+                        'label': _int64_feature(class_map[label]),
+                        'image': _bytes_feature(image_raw)
+                    }
+                    sys.stdout.flush()
+                    example = tf.train.Example(features=tf.train.Features(feature=features))
+                    writer.write(example.SerializeToString())
+                else:
+                    print('cannot process, wrong shape: '+ file_path +'\n')
+                    file.write('cannot process, wrong shape: '+ file_path +'\n')
+            except:
+                print('cannot process, error: '+ file_path +'\n')
+                print(sys.exc_info()[0])
+                file.write('cannot process, exception: '+ file_path +'\n')
             sys.stdout.flush()
-            example = tf.train.Example(features=tf.train.Features(feature=features))
-            writer.write(example.SerializeToString())
+    file.close()
 
 def process_data_dir(data_dir: str):
 

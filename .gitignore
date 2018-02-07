@@ -1,1 +1,11 @@
+# Untracked files:
+
+# Dataset
 **.jpg
+
+# Generated
+**.txt
+**.p
+
+# Editor-specific
+.vscode

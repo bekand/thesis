@@ -9,3 +9,4 @@
 
 # Editor-specific
 .vscode
+.flake8

@@ -37,7 +37,7 @@ def convert_to_tfrecord(dataset_name,
     record_filename = path.join(data_directory, dataset_name + '.tfrecords')
 
     # Create txt to write skipped files to
-    with tf.python_io.TFRecordWriter(record_filename) as writer, open('badfiles.txt', 'w+') as badfiles:
+    with tf.python_io.TFRecordWriter(record_filename) as writer, open('badfiles' + dataset_name + '.txt', 'w+') as badf:
         for index, sample in enumerate(dataset):
             file_path, label = sample
             image = cv2.imread(file_path)
@@ -47,7 +47,7 @@ def convert_to_tfrecord(dataset_name,
             try:
                 image = cv2.resize(image, (224, 224))
                 if np.shape(image) == (224, 224, 3):
-                    print('Processing: ' + file_path + '\n' + 'with shape:' + str(np.shape(image)))
+                    print('Processing: ' + file_path + '               ', end='\r')
                     image_raw = np.array(image).tostring()
                     features = {
                         'label': _int64_feature(class_map[label]),
@@ -59,12 +59,12 @@ def convert_to_tfrecord(dataset_name,
                 else:
                     err = 'cannot process, wrong shape: ' + file_path + '\n'
                     print(err)
-                    badfiles.write(err)
+                    badf.write(err)
             except:
                 err = 'cannot process, exception: ' + file_path + '\n'
                 print(err)
                 print(sys.exc_info()[0])
-                badfiles.write(err)
+                badf.write(err)
             sys.stdout.flush()
 
 

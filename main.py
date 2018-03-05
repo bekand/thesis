@@ -10,15 +10,19 @@ LABEL_NAMES = ['Art Nouveau (Modern)', 'Baroque', 'Expressionism',
                'Impressionism', 'Post-Impressionsim', 'Realism',
                'Rococo', 'Romanticism', 'Surrealism', 'Symbolism']
 INPUT_SHAPE = (224, 224, 3)
-EPOCHS = 100
-BATCH_SIZE = 16
-if path.isdir("/painting-styles"):  # we are on floydhub
+if path.isdir('/painting-styles'):  # we are on floydhub
     TRAIN_RECORD = '/painting-styles/train.tfrecords'
     TEST_RECORD = '/painting-styles/test.tfrecords'
+    OUTPUT_DIR = '/output'
 else:
     DATA_DIR = path.expanduser('cnn_input')
-    TRAIN_RECORD = (path.join(DATA_DIR, 'painting-styles\\train.tfrecords'))
-    TRAIN_RECORD = (path.join(DATA_DIR, 'painting-styles\\test.tfrecords'))
+    TRAIN_RECORD = path.join(DATA_DIR, 'painting-styles\\train.tfrecords')
+    TRAIN_RECORD = path.join(DATA_DIR, 'painting-styles\\test.tfrecords')
+    OUTPUT_DIR = path.expanduser('output')
+
+# --Configurations--
+EPOCHS = 5
+BATCH_SIZE = 16
 
 
 # --Utility functions--
@@ -26,14 +30,16 @@ else:
 def parser(example_proto):
     features = {'label': tf.FixedLenFeature((), tf.int64, default_value=0),
                 'image': tf.FixedLenFeature((), tf.string, default_value="")}
-    parsed_features = tf.parse_single_example(example_proto, features)
-    parsed_features['image'] = tf.decode_raw(parsed_features['image'], tf.uint8)
-    parsed_features['image'] = tf.reshape(parsed_features['image'], INPUT_SHAPE)
-    return tf.one_hot(parsed_features['label'], NUM_CLASSES), parsed_features['image']
+    parsed_features = tf.parse_single_example(serialized=example_proto, features=features)
+    image = tf.decode_raw(parsed_features['image'], tf.uint8)
+    image = tf.cast(image, tf.float32)
+    image = tf.reshape(image, INPUT_SHAPE)
+    # image = tf.reverse(image, axis=[2]) # 'RGB'->'BGR'
+    return image, tf.one_hot(parsed_features['label'], NUM_CLASSES)
 
 
 # randomly alter this batch of images (flip/darken/brighten)
-def augmenter(label, image):
+def augmenter(image, label):
     flip_chance = random.randint(0, 100)
     rand_brightness_chance = random.randint(0, 100)
 
@@ -41,19 +47,20 @@ def augmenter(label, image):
         image = tf.image.flip_left_right(image)
     if rand_brightness_chance <= 40:
         image = tf.image.random_brightness(image, 0.4)
-    return label, image
+    return dict(zip(['vgg16_input'], [image])), label
 
 
 def input_pipeline(path_to_recod, batch_size=BATCH_SIZE, parser_function=parser):
     dataset = tf.data.TFRecordDataset(path_to_recod)
-    dataset = (dataset.repeat()
+    dataset = (dataset.repeat(EPOCHS)
                .shuffle(1000)
                .map(parser_function)
                .map(augmenter)
                .batch(batch_size)
                .prefetch(batch_size))
-
-    return dataset
+    iterator = dataset.make_one_shot_iterator()
+    features, labels = iterator.get_next()
+    return features, labels
 
 
 pre_trained = K.applications.vgg16.VGG16(include_top=False,
@@ -65,13 +72,25 @@ for layer in pre_trained.layers[:-4]:
     layer.trainable = False
 
 
-classifier = K.models.Sequential()
-classifier.add(pre_trained)
-classifier.add(K.layers.Flatten(input_shape=pre_trained.output_shape[1:]))
-classifier.add(K.layers.Dense(256, activation='relu'))
-classifier.add(K.layers.Dropout(0.25))
-classifier.add(K.layers.Dense(256, activation='relu'))
-classifier.add(K.layers.Dropout(0.25))
-classifier.add(K.layers.Dense(NUM_CLASSES, activation='softmax'))
+model = K.models.Sequential()
+model.add(pre_trained)
+model.add(K.layers.Flatten(input_shape=pre_trained.output_shape[1:]))
+model.add(K.layers.Dense(256, activation='relu'))
+model.add(K.layers.Dropout(0.25))
+model.add(K.layers.Dense(256, activation='relu'))
+model.add(K.layers.Dropout(0.25))
+model.add(K.layers.Dense(NUM_CLASSES, activation='softmax'))
 
-classifier.summary()
+model.compile(optimizer='adadelta',
+              loss='categorical_crossentropy',
+              metrics=['accuracy'])
+model.summary()
+
+estimator = tf.keras.estimator.model_to_estimator(keras_model=model, model_dir=OUTPUT_DIR)
+
+train_input = lambda: input_pipeline(TRAIN_RECORD)
+train_spec = tf.estimator.TrainSpec(input_fn=train_input)
+test_input = lambda: input_pipeline(TEST_RECORD)
+eval_spec = tf.estimator.EvalSpec(input_fn=test_input)
+
+tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)

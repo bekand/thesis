@@ -21,7 +21,7 @@ else:
     OUTPUT_DIR = path.expanduser('output')
 
 # --Configurations--
-EPOCHS = 5
+EPOCHS = 10
 BATCH_SIZE = 16
 
 
@@ -34,12 +34,11 @@ def parser(example_proto):
     image = tf.decode_raw(parsed_features['image'], tf.uint8)
     image = tf.cast(image, tf.float32)
     image = tf.reshape(image, INPUT_SHAPE)
-    # image = tf.reverse(image, axis=[2]) # 'RGB'->'BGR'
     return image, tf.one_hot(parsed_features['label'], NUM_CLASSES)
 
 
-# randomly alter this batch of images (flip/darken/brighten)
-def augmenter(image, label):
+# augmentation and preprocessing
+def preprocessing(image, label):
     flip_chance = random.randint(0, 100)
     rand_brightness_chance = random.randint(0, 100)
 
@@ -47,6 +46,7 @@ def augmenter(image, label):
         image = tf.image.flip_left_right(image)
     if rand_brightness_chance <= 40:
         image = tf.image.random_brightness(image, 0.4)
+    image = K.applications.vgg16.preprocess_input(image)
     return dict(zip(['vgg16_input'], [image])), label
 
 
@@ -55,7 +55,7 @@ def input_pipeline(path_to_recod, batch_size=BATCH_SIZE, parser_function=parser)
     dataset = (dataset.repeat(EPOCHS)
                .shuffle(1000)
                .map(parser_function)
-               .map(augmenter)
+               .map(preprocessing)
                .batch(batch_size)
                .prefetch(batch_size))
     iterator = dataset.make_one_shot_iterator()
@@ -68,20 +68,20 @@ pre_trained = K.applications.vgg16.VGG16(include_top=False,
                                          input_shape=INPUT_SHAPE)
 
 # Freeze the layers except the last 4 layers
-for layer in pre_trained.layers[:-4]:
+for layer in pre_trained.layers:
     layer.trainable = False
 
 
 model = K.models.Sequential()
 model.add(pre_trained)
 model.add(K.layers.Flatten(input_shape=pre_trained.output_shape[1:]))
-model.add(K.layers.Dense(256, activation='relu'))
+model.add(K.layers.Dense(512, activation='relu'))
 model.add(K.layers.Dropout(0.25))
-model.add(K.layers.Dense(256, activation='relu'))
+model.add(K.layers.Dense(512, activation='relu'))
 model.add(K.layers.Dropout(0.25))
 model.add(K.layers.Dense(NUM_CLASSES, activation='softmax'))
 
-model.compile(optimizer='adadelta',
+model.compile(optimizer='adam',
               loss='categorical_crossentropy',
               metrics=['accuracy'])
 model.summary()

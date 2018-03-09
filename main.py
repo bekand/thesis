@@ -22,7 +22,7 @@ else:
 
 # --Configurations--
 EPOCHS = 10
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 
 
 # --Utility functions--
@@ -46,8 +46,7 @@ def preprocessing(image, label):
         image = tf.image.flip_left_right(image)
     if rand_brightness_chance <= 40:
         image = tf.image.random_brightness(image, 0.4)
-    image = K.applications.vgg16.preprocess_input(image)
-    return dict(zip(['vgg16_input'], [image])), label
+    return dict(zip(['vgg16_input'], [K.applications.vgg16.preprocess_input(image)])), label
 
 
 def input_pipeline(path_to_recod, batch_size=BATCH_SIZE, parser_function=parser):
@@ -75,17 +74,16 @@ for layer in pre_trained.layers:
 model = K.models.Sequential()
 model.add(pre_trained)
 model.add(K.layers.Flatten(input_shape=pre_trained.output_shape[1:]))
-model.add(K.layers.Dense(512, activation='relu'))
-model.add(K.layers.Dropout(0.25))
-model.add(K.layers.Dense(512, activation='relu'))
-model.add(K.layers.Dropout(0.25))
+model.add(K.layers.Dense(1024, activation='relu'))
+model.add(K.layers.Dropout(0.5))
+model.add(K.layers.Dense(1024, activation='relu'))
+model.add(K.layers.Dropout(0.5))
 model.add(K.layers.Dense(NUM_CLASSES, activation='softmax'))
 
-model.compile(optimizer='adam',
+model.compile(optimizer=K.optimizers.Nadam(lr=0.0001),
               loss='categorical_crossentropy',
               metrics=['accuracy'])
 model.summary()
-
 estimator = tf.keras.estimator.model_to_estimator(keras_model=model, model_dir=OUTPUT_DIR)
 
 train_input = lambda: input_pipeline(TRAIN_RECORD)

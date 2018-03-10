@@ -22,7 +22,7 @@ else:
 
 # --Configurations--
 EPOCHS = 10
-BATCH_SIZE = 32
+BATCH_SIZE = 128
 
 
 # --Utility functions--
@@ -40,12 +40,12 @@ def parser(example_proto):
 # augmentation and preprocessing
 def preprocessing(image, label):
     flip_chance = random.randint(0, 100)
-    rand_brightness_chance = random.randint(0, 100)
+  #  rand_brightness_chance = random.randint(0, 100)
 
     if flip_chance <= 20:
         image = tf.image.flip_left_right(image)
-    if rand_brightness_chance <= 40:
-        image = tf.image.random_brightness(image, 0.4)
+   # if rand_brightness_chance <= 20:
+     #   image = tf.image.random_brightness(image, 0.4)
     return dict(zip(['vgg16_input'], [K.applications.vgg16.preprocess_input(image)])), label
 
 
@@ -70,17 +70,18 @@ pre_trained = K.applications.vgg16.VGG16(include_top=False,
 for layer in pre_trained.layers:
     layer.trainable = False
 
-
 model = K.models.Sequential()
 model.add(pre_trained)
 model.add(K.layers.Flatten(input_shape=pre_trained.output_shape[1:]))
 model.add(K.layers.Dense(1024, activation='relu'))
-model.add(K.layers.Dropout(0.5))
+model.add(K.layers.BatchNormalization())
+model.add(K.layers.Dropout(0.6))
 model.add(K.layers.Dense(1024, activation='relu'))
-model.add(K.layers.Dropout(0.5))
+model.add(K.layers.BatchNormalization())
+model.add(K.layers.Dropout(0.6))
 model.add(K.layers.Dense(NUM_CLASSES, activation='softmax'))
 
-model.compile(optimizer=K.optimizers.Nadam(lr=0.0001),
+model.compile(optimizer=K.optimizers.Nadam(lr=0.0001, schedule_decay=0.006),
               loss='categorical_crossentropy',
               metrics=['accuracy'])
 model.summary()

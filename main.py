@@ -1,6 +1,7 @@
 import os.path as path
 import tensorflow as tf
 from tensorflow import keras as K
+import numpy as np
 import random
 
 
@@ -9,6 +10,8 @@ NUM_CLASSES = 10
 LABEL_NAMES = ['Art Nouveau (Modern)', 'Baroque', 'Expressionism',
                'Impressionism', 'Post-Impressionsim', 'Realism',
                'Rococo', 'Romanticism', 'Surrealism', 'Symbolism']
+TRAIN_EXAMPLES = 48100  # number of train examples
+TEST_EXAMPLES = 14790  # number of validation examples
 INPUT_SHAPE = (224, 224, 3)
 if path.isdir('/painting-styles'):  # we are on floydhub
     TRAIN_RECORD = '/painting-styles/train.tfrecords'
@@ -17,11 +20,11 @@ if path.isdir('/painting-styles'):  # we are on floydhub
 else:
     DATA_DIR = path.expanduser('cnn_input')
     TRAIN_RECORD = path.join(DATA_DIR, 'painting-styles\\train.tfrecords')
-    TRAIN_RECORD = path.join(DATA_DIR, 'painting-styles\\test.tfrecords')
+    TEST_RECORD = path.join(DATA_DIR, 'painting-styles\\test.tfrecords')
     OUTPUT_DIR = path.expanduser('output')
 
 # --Configurations--
-EPOCHS = 10
+EPOCHS = 20
 BATCH_SIZE = 128
 
 
@@ -49,7 +52,7 @@ def preprocessing(image, label):
     return dict(zip(['model_1_input'], [K.applications.vgg16.preprocess_input(image)])), label
 
 
-def input_pipeline(path_to_recod, batch_size=BATCH_SIZE, parser_function=parser):
+def batch_generator(path_to_recod, batch_size=BATCH_SIZE, parser_function=parser):
     dataset = tf.data.TFRecordDataset(path_to_recod)
     dataset = (dataset.repeat(EPOCHS)
                .shuffle(1000)
@@ -58,10 +61,12 @@ def input_pipeline(path_to_recod, batch_size=BATCH_SIZE, parser_function=parser)
                .batch(batch_size)
                .prefetch(batch_size))
     iterator = dataset.make_one_shot_iterator()
-    features, labels = iterator.get_next()
-    return features, labels
+    next_batch = iterator.get_next()
+    while True:
+        yield K.backend.get_session().run(next_batch)
 
 
+tf.logging.set_verbosity(tf.logging.INFO)
 pre_trained = K.applications.vgg16.VGG16(include_top=False,
                                          weights='imagenet',
                                          input_shape=INPUT_SHAPE)
@@ -73,30 +78,52 @@ for layer in pre_trained.layers:
 
 model = K.models.Sequential()
 model.add(pre_trained)
-model.add(K.layers.Conv2D(512, (3, 3), activation='relu', padding='same'))
+
+model.add(K.layers.Conv2D(256, (3, 3), padding='same'))
 model.add(K.layers.BatchNormalization())
-model.add(K.layers.Conv2D(512, (3, 3), activation='relu', padding='same'))
+model.add(K.layers.Activation('relu'))
+model.add(K.layers.Conv2D(256, (3, 3), padding='same'))
 model.add(K.layers.BatchNormalization())
-model.add(K.layers.Conv2D(512, (3, 3), activation='relu', padding='same'))
+model.add(K.layers.Activation('relu'))
 model.add(K.layers.MaxPooling2D((2, 2), strides=(2, 2)))
+
 model.add(K.layers.Flatten(input_shape=pre_trained.output_shape[1:]))
-model.add(K.layers.Dense(1024, activation='relu', kernel_regularizer=K.regularizers.l1_l2()))
+
+model.add(K.layers.Dense(512, kernel_regularizer=K.regularizers.l2()))
 model.add(K.layers.BatchNormalization())
 model.add(K.layers.Dropout(0.5))
-model.add(K.layers.Dense(1024, activation='relu', kernel_regularizer=K.regularizers.l1_l2()))
+model.add(K.layers.Activation('relu'))
+
+model.add(K.layers.Dense(512, kernel_regularizer=K.regularizers.l2()))
 model.add(K.layers.BatchNormalization())
 model.add(K.layers.Dropout(0.5))
+model.add(K.layers.Activation('relu'))
+
 model.add(K.layers.Dense(NUM_CLASSES, activation='softmax'))
 
 model.compile(optimizer=K.optimizers.Nadam(lr=0.00002),
               loss='categorical_crossentropy',
               metrics=['accuracy'])
 model.summary()
-estimator = tf.keras.estimator.model_to_estimator(keras_model=model, model_dir=OUTPUT_DIR)
 
-train_input = lambda: input_pipeline(TRAIN_RECORD)
-train_spec = tf.estimator.TrainSpec(input_fn=train_input)
-test_input = lambda: input_pipeline(TEST_RECORD)
-eval_spec = tf.estimator.EvalSpec(input_fn=test_input)
+tensorboardCB = K.callbacks.TensorBoard(log_dir=OUTPUT_DIR,
+                                        histogram_freq=0,
+                                        write_graph=True)
+checkpointCB = K.callbacks.ModelCheckpoint(filepath=OUTPUT_DIR + '/model.h5',
+                                           verbose=1,
+                                           save_best_only=True,
+                                           monitor='val_acc',
+                                           mode='max')
 
-tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
+model.fit_generator(generator=batch_generator(TRAIN_RECORD),
+                    validation_data=batch_generator(TEST_RECORD),
+                    validation_steps=TRAIN_EXAMPLES / BATCH_SIZE,
+                    steps_per_epoch=TEST_EXAMPLES / BATCH_SIZE,
+                    epochs=EPOCHS,
+                    verbose=2,
+                    callbacks=[checkpointCB, tensorboardCB],
+                    workers=0)
+predictions = model.predict_generator(generator=batch_generator(TEST_RECORD), steps=1, workers=0, verbose=1)
+print(predictions)
+predictions = np.argmax(predictions, axis=-1)
+print(predictions)

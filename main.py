@@ -10,8 +10,8 @@ NUM_CLASSES = 10
 LABEL_NAMES = ['Art Nouveau (Modern)', 'Baroque', 'Expressionism',
                'Impressionism', 'Post-Impressionsim', 'Realism',
                'Rococo', 'Romanticism', 'Surrealism', 'Symbolism']
-TRAIN_EXAMPLES = 48100  # number of train examples
-TEST_EXAMPLES = 14790  # number of validation examples
+TRAIN_EXAMPLES = 48100  # approx. number of train examples
+TEST_EXAMPLES = 14790  # approx. number of validation examples
 INPUT_SHAPE = (224, 224, 3)
 if path.isdir('/painting-styles'):  # we are on floydhub
     TRAIN_RECORD = '/painting-styles/train.tfrecords'
@@ -49,12 +49,12 @@ def preprocessing(image, label):
         image = tf.image.flip_left_right(image)
     if rand_brightness_chance <= 20:
         image = tf.image.random_brightness(image, 0.4)
-    return dict(zip(['model_1_input'], [K.applications.vgg16.preprocess_input(image)])), label
+    return dict(zip(['resnet50_input'], [K.applications.vgg16.preprocess_input(image)])), label
 
 
 def batch_generator(path_to_recod, batch_size=BATCH_SIZE, parser_function=parser):
     dataset = tf.data.TFRecordDataset(path_to_recod)
-    dataset = (dataset.repeat(EPOCHS)
+    dataset = (dataset.repeat(EPOCHS + 1)  # so we don't run out of data, even with rounding errors
                .shuffle(1000)
                .map(parser_function)
                .map(preprocessing)
@@ -67,41 +67,31 @@ def batch_generator(path_to_recod, batch_size=BATCH_SIZE, parser_function=parser
 
 
 tf.logging.set_verbosity(tf.logging.INFO)
-pre_trained = K.applications.vgg16.VGG16(include_top=False,
-                                         weights='imagenet',
-                                         input_shape=INPUT_SHAPE)
+pre_trained = K.applications.resnet50.ResNet50(include_top=False,
+                                               weights='imagenet',
+                                               input_shape=INPUT_SHAPE)
 
-
-pre_trained = K.Model(pre_trained.input, pre_trained.layers[-4].output)  # remove last 4 layers
-for layer in pre_trained.layers:
+for layer in pre_trained.layers[:-11]:
     layer.trainable = False
 
 model = K.models.Sequential()
 model.add(pre_trained)
 
-model.add(K.layers.Conv2D(256, (3, 3), padding='same'))
-model.add(K.layers.BatchNormalization())
-model.add(K.layers.Activation('relu'))
-model.add(K.layers.Conv2D(256, (3, 3), padding='same'))
-model.add(K.layers.BatchNormalization())
-model.add(K.layers.Activation('relu'))
-model.add(K.layers.MaxPooling2D((2, 2), strides=(2, 2)))
-
 model.add(K.layers.Flatten(input_shape=pre_trained.output_shape[1:]))
 
-model.add(K.layers.Dense(512, kernel_regularizer=K.regularizers.l2()))
+model.add(K.layers.Dense(128, kernel_regularizer=K.regularizers.l2()))
 model.add(K.layers.BatchNormalization())
 model.add(K.layers.Dropout(0.5))
 model.add(K.layers.Activation('relu'))
 
-model.add(K.layers.Dense(512, kernel_regularizer=K.regularizers.l2()))
+model.add(K.layers.Dense(128, kernel_regularizer=K.regularizers.l2()))
 model.add(K.layers.BatchNormalization())
 model.add(K.layers.Dropout(0.5))
 model.add(K.layers.Activation('relu'))
 
 model.add(K.layers.Dense(NUM_CLASSES, activation='softmax'))
 
-model.compile(optimizer=K.optimizers.Nadam(lr=0.00002),
+model.compile(optimizer=K.optimizers.Nadam(lr=0.0002),
               loss='categorical_crossentropy',
               metrics=['accuracy'])
 model.summary()
@@ -114,14 +104,15 @@ checkpointCB = K.callbacks.ModelCheckpoint(filepath=OUTPUT_DIR + '/model.h5',
                                            save_best_only=True,
                                            monitor='val_acc',
                                            mode='max')
+earlystoppingCB = K.callbacks.EarlyStopping(monitor='val_acc', mode='max', patience=2, verbose=1)
 
 model.fit_generator(generator=batch_generator(TRAIN_RECORD),
-                    validation_data=batch_generator(TEST_RECORD),
-                    validation_steps=TRAIN_EXAMPLES / BATCH_SIZE,
-                    steps_per_epoch=TEST_EXAMPLES / BATCH_SIZE,
+                    steps_per_epoch=TRAIN_EXAMPLES / BATCH_SIZE,
                     epochs=EPOCHS,
+                    validation_data=batch_generator(TEST_RECORD),
+                    validation_steps=TEST_EXAMPLES / BATCH_SIZE,
                     verbose=2,
-                    callbacks=[checkpointCB, tensorboardCB],
+                    callbacks=[checkpointCB, tensorboardCB, earlystoppingCB],
                     workers=0)
 predictions = model.predict_generator(generator=batch_generator(TEST_RECORD), steps=1, workers=0, verbose=1)
 print(predictions)

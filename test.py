@@ -24,8 +24,8 @@ else:
     OUTPUT_DIR = path.expanduser('output')
 
 # --Configurations--
-EPOCHS = 20
-BATCH_SIZE = 128
+EPOCHS = 100
+BATCH_SIZE = 32
 
 
 # --Utility functions--
@@ -37,6 +37,7 @@ def parser(example_proto):
     image = tf.decode_raw(parsed_features['image'], tf.uint8)
     image = tf.cast(image, tf.float32)
     image = tf.reshape(image, INPUT_SHAPE)
+    image = tf.image.resize_images(image, (224,224))
     return image, tf.one_hot(parsed_features['label'], NUM_CLASSES)
 
 
@@ -48,8 +49,8 @@ def preprocessing(image, label):
     if flip_chance <= 20:
         image = tf.image.flip_left_right(image)
     if rand_brightness_chance <= 20:
-        image = tf.image.random_brightness(image, 0.4)
-    return dict(zip(['resnet50_input'], [K.applications.resnet50.preprocess_input(image)])), label
+        image = tf.image.random_brightness(image, 0.2)
+    return dict(zip(['conv2d_1_input'], [K.applications.resnet50.preprocess_input(image)])), label
 
 
 def batch_generator(path_to_recod, batch_size=BATCH_SIZE, parser_function=parser):
@@ -67,44 +68,6 @@ def batch_generator(path_to_recod, batch_size=BATCH_SIZE, parser_function=parser
 
 
 tf.logging.set_verbosity(tf.logging.INFO)
-pre_trained = K.applications.resnet50.ResNet50(include_top=False,
-                                               weights='imagenet',
-                                               input_shape=INPUT_SHAPE)
-
-for layer in pre_trained.layers[:-11]:
-    layer.trainable = False
-
-model = K.models.Sequential()
-model.add(pre_trained)
-
-model.add(K.layers.Flatten(input_shape=pre_trained.output_shape[1:]))
-
-model.add(K.layers.Dense(32, kernel_regularizer=K.regularizers.l2()))
-model.add(K.layers.BatchNormalization())
-model.add(K.layers.Dropout(0.5))
-model.add(K.layers.Activation('relu'))
-
-model.add(K.layers.Dense(32, kernel_regularizer=K.regularizers.l2()))
-model.add(K.layers.BatchNormalization())
-model.add(K.layers.Dropout(0.5))
-model.add(K.layers.Activation('relu'))
-
-model.add(K.layers.Dense(NUM_CLASSES, activation='softmax'))
-
-model.compile(optimizer=K.optimizers.Nadam(lr=0.00006),
-              loss='categorical_crossentropy',
-              metrics=['accuracy'])
-model.summary()
-
-tensorboardCB = K.callbacks.TensorBoard(log_dir=OUTPUT_DIR,
-                                        histogram_freq=0,
-                                        write_graph=True)
-checkpointCB = K.callbacks.ModelCheckpoint(filepath=OUTPUT_DIR + '/model.h5',
-                                           verbose=1,
-                                           save_best_only=True,
-                                           monitor='val_acc',
-                                           mode='max')
-earlystoppingCB = K.callbacks.EarlyStopping(monitor='val_acc', mode='max', patience=2, verbose=1)
 class_weights = {0: 2.18,
                  1: 2.52,
                  2: 1.54,
@@ -115,13 +78,60 @@ class_weights = {0: 2.18,
                  7: 1.16,
                  8: 2.63,
                  9: 3.13}
+model = K.models.Sequential()
+
+model.add(K.layers.Conv2D(8, kernel_size=(3, 3), activation='relu', input_shape=(224, 224, 3), padding='same'))
+model.add(K.layers.BatchNormalization())
+model.add(K.layers.Conv2D(8, kernel_size=(3, 3), activation='relu', padding='same'))
+model.add(K.layers.BatchNormalization())
+model.add(K.layers.Conv2D(8, kernel_size=(3, 3), activation='relu', padding='same'))
+model.add(K.layers.BatchNormalization())
+model.add(K.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2)))
+
+model.add(K.layers.Conv2D(16, kernel_size=(3, 3), activation='relu', padding='same'))
+model.add(K.layers.BatchNormalization())
+model.add(K.layers.Conv2D(16, kernel_size=(3, 3), activation='relu', padding='same'))
+model.add(K.layers.BatchNormalization())
+model.add(K.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2)))
+
+model.add(K.layers.Conv2D(32, kernel_size=(3, 3), activation='relu', padding='same'))
+model.add(K.layers.BatchNormalization())
+model.add(K.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2)))
+
+model.add(K.layers.Flatten())
+model.add(K.layers.Dense(8, kernel_regularizer=K.regularizers.l2()))
+model.add(K.layers.BatchNormalization())
+model.add(K.layers.Dropout(0.5))
+model.add(K.layers.Activation('relu'))
+model.add(K.layers.Dense(8, kernel_regularizer=K.regularizers.l2()))
+model.add(K.layers.BatchNormalization())
+model.add(K.layers.Dropout(0.5))
+model.add(K.layers.Activation('relu'))
+
+model.add(K.layers.Dense(NUM_CLASSES,
+                         activation='softmax',
+                         kernel_regularizer=K.regularizers.l2()))
+
+model.compile(optimizer=K.optimizers.Nadam(lr=0.00002),
+              loss='categorical_crossentropy',
+              metrics=['accuracy'])
+model.summary()
+tensorboardCB = K.callbacks.TensorBoard(log_dir=OUTPUT_DIR,
+                                        histogram_freq=0,
+                                        write_graph=True)
+earlystoppingCB = K.callbacks.EarlyStopping(monitor='val_loss', mode='auto', patience=3, verbose=1)
+checkpointCB = K.callbacks.ModelCheckpoint(filepath=OUTPUT_DIR + '/testModel.h5',
+                                           verbose=1,
+                                           save_best_only=True,
+                                           monitor='val_acc',
+                                           mode='max')
 model.fit_generator(generator=batch_generator(TRAIN_RECORD),
                     steps_per_epoch=TRAIN_EXAMPLES / BATCH_SIZE,
                     epochs=EPOCHS,
+                    class_weight=class_weights,
                     validation_data=batch_generator(TEST_RECORD),
                     validation_steps=TEST_EXAMPLES / BATCH_SIZE,
                     verbose=2,
-                    class_weight=class_weights,
                     callbacks=[checkpointCB, tensorboardCB, earlystoppingCB],
                     workers=0)
 predictions = model.predict_generator(generator=batch_generator(TEST_RECORD), steps=1, workers=0, verbose=1)
